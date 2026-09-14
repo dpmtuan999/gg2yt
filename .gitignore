@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/*token*.json
+credentials/credentials.json
+.env
+*.log
+.playwright-mcp/
+.omo/
+.codegraph

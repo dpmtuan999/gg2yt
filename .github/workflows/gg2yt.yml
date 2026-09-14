@@ -1,0 +1,65 @@
+name: GG2YT Auto-Upload
+
+on:
+  schedule:
+    # Chạy mỗi 5 phút (UTC). Cron ngắn nhất GitHub hỗ trợ.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+  # Cho phép bấm "Run workflow" bằng tay từ tab Actions để test ngay
+
+permissions:
+  contents: write
+  # GITHUB_TOKEN có quyền commit file state về repo
+
+concurrency:
+  group: gg2yt-poller
+  cancel-in-progress: false
+  # Không cho 2 run chạy cùng lúc → tránh upload trùng
+
+jobs:
+  poll-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    env:
+      GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+      YOUTUBE_PRIVACY_STATUS: unlisted
+      CREDENTIALS_PATH: ./credentials/credentials.json
+      DRIVE_TOKEN_PATH: ./data/drive-token.json
+      YOUTUBE_TOKEN_PATH: ./data/youtube-token.json
+      STATE_PATH: ./data/processed.json
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Restore credentials & tokens from secrets
+        run: |
+          mkdir -p credentials data
+          printf '%s' "${{ secrets.GG2YT_CREDENTIALS_B64 }}" | base64 -d > credentials/credentials.json
+          printf '%s' "${{ secrets.GG2YT_DRIVE_TOKEN_B64 }}" | base64 -d > data/drive-token.json
+          printf '%s' "${{ secrets.GG2YT_YOUTUBE_TOKEN_B64 }}" | base64 -d > data/youtube-token.json
+          test -s credentials/credentials.json || { echo "::error::GG2YT_CREDENTIALS_B64 empty or invalid"; exit 1; }
+          test -s data/drive-token.json || { echo "::error::GG2YT_DRIVE_TOKEN_B64 empty or invalid"; exit 1; }
+          test -s data/youtube-token.json || { echo "::error::GG2YT_YOUTUBE_TOKEN_B64 empty or invalid"; exit 1; }
+
+      - name: Poll & upload (one cycle)
+        run: node dist/index.js --once
+
+      - name: Commit processed state
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update gg2yt processed state"
+          file_pattern: "data/processed.json"
