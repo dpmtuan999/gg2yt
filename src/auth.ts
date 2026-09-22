@@ -227,5 +227,16 @@ export async function authenticate(
     }
   }
 
+  // Trong CI (GitHub Actions), không thể mở browser để re-authorize.
+  // Fail nhanh thay vì treo chờ callback vô hạn trên runner.
+  if (process.env.CI) {
+    throw new Error(
+      `Không thể re-authorize ${label} trong CI: token expired hoặc revoked.\n` +
+        'Chạy "npm run auth" trên máy local để lấy token mới, sau đó cập nhật secret ' +
+        `${target === "drive" ? "GG2YT_DRIVE_TOKEN_B64" : "GG2YT_YOUTUBE_TOKEN_B64"} ` +
+        "trên GitHub.",
+    );
+  }
+
   return authorizeViaBrowser(config, credentials, target);
 }
