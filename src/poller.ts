@@ -152,18 +152,25 @@ async function pollOnce(
   const videos = await listVideosInFolder(drive, config.driveFolderId);
 
   // Filter to only unprocessed videos
-  const newVideos = videos.filter(
-    (v) => !(v.id in state.processed),
-  );
+  const pending = videos.filter((v) => !(v.id in state.processed));
 
-  if (newVideos.length === 0) {
+  if (pending.length === 0) {
     console.log(
       `   ℹ️  No new videos found (${videos.length} total in folder)`,
     );
     return state;
   }
 
-  console.log(`   📋 Found ${newVideos.length} new video(s) to process`);
+  // Giới hạn số upload mỗi run: một run phải luôn kịp hoàn tất trước job
+  // timeout của CI. Nếu không, state không được commit → run sau upload trùng.
+  const newVideos = pending.slice(0, config.maxUploadsPerRun);
+
+  console.log(
+    `   📋 Found ${pending.length} new video(s) to process` +
+      (newVideos.length < pending.length
+        ? ` — uploading ${newVideos.length} now, ${pending.length - newVideos.length} in the next run`
+        : ""),
+  );
 
   // Process videos sequentially to avoid YouTube rate limits
   for (const video of newVideos) {

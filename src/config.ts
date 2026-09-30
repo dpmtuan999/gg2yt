@@ -8,6 +8,8 @@ export interface Config {
   driveFolderId: string;
   /** Polling interval in milliseconds */
   pollIntervalMs: number;
+  /** Max videos uploaded per poll cycle — keeps a run inside the CI job timeout */
+  maxUploadsPerRun: number;
   /** Path to OAuth2 credentials.json */
   credentialsPath: string;
   /** Path to persisted OAuth2 tokens for the Google Drive account */
@@ -44,6 +46,7 @@ export function loadConfig(): Config {
   return {
     driveFolderId,
     pollIntervalMs: parseInt(optionalEnv("POLL_INTERVAL_MS", "300000"), 10),
+    maxUploadsPerRun: parseInt(optionalEnv("MAX_UPLOADS_PER_RUN", "10"), 10),
     credentialsPath: resolve(
       optionalEnv("CREDENTIALS_PATH", "./credentials/credentials.json"),
     ),
