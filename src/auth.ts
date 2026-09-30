@@ -23,6 +23,38 @@ function labelFor(target: AuthTarget): string {
   return target === "drive" ? "Google Drive" : "YouTube";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Trích mã lỗi thật từ Google OAuth (vd. `invalid_grant` khi refresh token đã
+ * bị revoke). Không có bước này thì log chỉ ghi "token không hợp lệ" — CI fail
+ * mà không ai biết nguyên nhân.
+ */
+function describeOAuthFailure(err: unknown): string {
+  if (isRecord(err) && isRecord(err.response) && isRecord(err.response.data)) {
+    const { error, error_description: description } = err.response.data;
+    if (typeof error === "string") {
+      return typeof description === "string"
+        ? `${error} — ${description}`
+        : error;
+    }
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Lỗi CI có kèm nguyên nhân cụ thể + tên secret cần cập nhật. */
+function ciAuthFailure(target: AuthTarget, label: string, reason: string): Error {
+  const secret =
+    target === "drive" ? "GG2YT_DRIVE_TOKEN_B64" : "GG2YT_YOUTUBE_TOKEN_B64";
+  return new Error(
+    `Không thể re-authorize ${label} trong CI: ${reason}.\n` +
+      'Chạy "npm run auth" trên máy local để lấy token mới, sau đó cập nhật secret ' +
+      `${secret} trên GitHub.`,
+  );
+}
+
 function tokenPathFor(config: Config, target: AuthTarget): string {
   return target === "drive" ? config.driveTokenPath : config.youtubeTokenPath;
 }
@@ -208,11 +240,13 @@ export async function authenticate(
   });
 
   const saved = loadTokens(tokenPath);
-  if (saved?.refresh_token) {
+  const refreshToken = saved?.refresh_token;
+
+  if (refreshToken) {
     console.log(`🔑 Loading saved tokens (${label})...`);
     oauth2Client.setCredentials({
       access_token: saved.access_token,
-      refresh_token: saved.refresh_token,
+      refresh_token: refreshToken,
       expiry_date: saved.expiry_date ?? undefined,
       scope: saved.scope,
       token_type: saved.token_type ?? undefined,
@@ -222,19 +256,24 @@ export async function authenticate(
       await oauth2Client.getAccessToken();
       console.log(`✅ Tokens ${label} valid, access refreshed.`);
       return oauth2Client;
-    } catch {
-      console.log(`⚠️  Saved ${label} tokens invalid, re-authorizing...`);
+    } catch (err) {
+      const detail = describeOAuthFailure(err);
+      console.log(`⚠️  Saved ${label} tokens không dùng được: ${detail}`);
+      if (process.env.CI) {
+        throw ciAuthFailure(
+          target,
+          label,
+          `refresh token bị Google từ chối (${detail})`,
+        );
+      }
     }
-  }
-
-  // Trong CI (GitHub Actions), không thể mở browser để re-authorize.
-  // Fail nhanh thay vì treo chờ callback vô hạn trên runner.
-  if (process.env.CI) {
-    throw new Error(
-      `Không thể re-authorize ${label} trong CI: token expired hoặc revoked.\n` +
-        'Chạy "npm run auth" trên máy local để lấy token mới, sau đó cập nhật secret ' +
-        `${target === "drive" ? "GG2YT_DRIVE_TOKEN_B64" : "GG2YT_YOUTUBE_TOKEN_B64"} ` +
-        "trên GitHub.",
+  } else if (process.env.CI) {
+    throw ciAuthFailure(
+      target,
+      label,
+      existsSync(tokenPath)
+        ? `token file ${tokenPath} không chứa refresh_token (thiếu, rỗng, hoặc JSON hỏng)`
+        : `token file không tồn tại: ${tokenPath}`,
     );
   }
 
