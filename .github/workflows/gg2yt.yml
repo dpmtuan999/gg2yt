@@ -28,6 +28,8 @@ jobs:
       DRIVE_TOKEN_PATH: ./data/drive-token.json
       YOUTUBE_TOKEN_PATH: ./data/youtube-token.json
       STATE_PATH: ./data/processed.json
+      # Giới hạn số upload mỗi run để 1 run luôn kịp trước timeout 300 phút.
+      MAX_UPLOADS_PER_RUN: 10
 
     steps:
       - name: Checkout code
@@ -58,8 +60,25 @@ jobs:
       - name: Poll & upload (one cycle)
         run: node dist/index.js --once
 
+      # if: always() — commit state kể cả khi step trên fail, để không mất
+      # tiến độ đã upload (mất state = upload trùng ở run sau).
       - name: Commit processed state
+        if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update gg2yt processed state"
           file_pattern: "data/processed.json"
+
+      # Cron fail im lặng rất dễ — 8 ngày không ai biết. Ghi rõ lên run summary.
+      - name: Report failure
+        if: failure()
+        run: |
+          {
+            echo "## ❌ GG2YT run failed"
+            echo ""
+            echo "Xem log step **Poll & upload (one cycle)** để biết nguyên nhân."
+            echo ""
+            echo "Nếu là \`invalid_grant\` → token YouTube đã bị revoke/hết hạn:"
+            echo "chạy \`npm run auth\` trên máy local rồi cập nhật secret \`GG2YT_YOUTUBE_TOKEN_B64\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::GG2YT run failed — xem run summary để biết nguyên nhân"
